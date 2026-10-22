@@ -1,26 +1,27 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Grok Glasses</title>
 <style>body{background:#000;color:#fff;font-family:sans-serif;margin:0;padding:12px;font-size:20px}h1{margin:0 0 4px;font-size:28px}
 button{display:block;width:100%;font-size:26px;padding:16px;margin:8px 0;background:#000;color:#fff;border:3px solid #fff;border-radius:14px}
-button:focus{background:#fff;color:#000}#err{color:#f66}video,img{width:100%;max-height:160px;object-fit:cover;border:2px solid #fff;margin-top:6px}.box{min-height:1.2em;margin:6px 0}</style></head><body>
+button:focus{background:#fff;color:#000}#err{color:#f66}video,img{width:100%;max-height:160px;object-fit:cover;border:2px solid #fff;margin-top:6px}.big{font-size:28px;font-weight:bold}.box{min-height:1.2em;margin:6px 0}</style></head><body>
 <h1>Grok Glasses</h1><div>Connected. Ready.</div><div id="err" class="box"></div>
-<button id="rec">Record</button><div id="tx" class="box"></div><audio id="aud" controls style="width:100%;display:none"></audio>
+<button id="rec">Record</button><div id="tx" class="box"></div><div id="rp" class="box big"></div><audio id="aud" controls style="width:100%;display:none"></audio>
 <button id="cam">Start Camera</button><video id="v" autoplay playsinline muted style="display:none"></video>
-<button id="shot">Shutter</button><canvas id="c" style="display:none"></canvas><img id="th" style="display:none"><div id="an" class="box"></div>
+<button id="shot">Shutter</button><canvas id="c" style="display:none"></canvas><img id="th" style="display:none"><div id="an" class="box big"></div>
 <script>
-const ANALYZE_ENDPOINT=""; // set to a server-side proxy URL that accepts POST {image: dataURL} and returns {text}
+const API_BASE="https://grok-glasses-server.conscious-carnation.workers.dev";
+let hist=[],sent="";
+async function api(p,b){const r=await fetch(API_BASE+p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j.text}
+async function ask(t){t=(t||"").trim();if(!t||t===sent)return;sent=t;$("rp").textContent="Grok is thinking...";try{const a=await api("/chat",{text:t,history:hist});hist.push({role:"user",content:t},{role:"assistant",content:a});hist=hist.slice(-10);$("rp").textContent=a}catch(e){err(e.message)}}
 const $=id=>document.getElementById(id),err=m=>{$("err").textContent="Error: "+m};
 let mr,chunks=[],sr,stream,cs;
-$("rec").onclick=async()=>{try{if(mr&&mr.state==="recording"){mr.stop();sr&&sr.stop();$("rec").textContent="Record";return}
+$("rec").onclick=async()=>{try{if(mr&&mr.state==="recording"){mr.stop();sr&&sr.stop();ask($("tx").textContent);$("rec").textContent="Record";return}
 stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];mr=new MediaRecorder(stream);
 mr.ondataavailable=e=>chunks.push(e.data);mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());const a=$("aud");a.src=URL.createObjectURL(new Blob(chunks));a.style.display="block"};mr.start();$("rec").textContent="Stop";
 const R=window.SpeechRecognition||window.webkitSpeechRecognition;
-if(R){sr=new R();sr.continuous=true;sr.interimResults=true;sr.onresult=e=>{$("tx").textContent=[...e.results].map(r=>r[0].transcript).join(" ")};sr.onerror=e=>err("speech: "+e.error);sr.start()}
+if(R){sr=new R();sr.continuous=true;sr.interimResults=true;sr.onresult=e=>{$("tx").textContent=[...e.results].map(r=>r[0].transcript).join(" ");const l=e.results[e.results.length-1];if(l.isFinal)ask(l[0].transcript)};sr.onerror=e=>err("speech: "+e.error);sr.start()}
 else $("tx").textContent="Speech recognition not supported on this device (audio still recording).";}catch(e){err(e.name+": "+e.message)}};
 $("cam").onclick=async()=>{try{cs=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});$("v").srcObject=cs;$("v").style.display="block"}catch(e){err(e.name+": "+e.message)}};
 $("shot").onclick=async()=>{try{const v=$("v");if(!v.videoWidth)return err("start the camera first");const c=$("c");c.width=v.videoWidth;c.height=v.videoHeight;c.getContext("2d").drawImage(v,0,0);
 const d=c.toDataURL("image/jpeg",0.7);$("th").src=d;$("th").style.display="block";
-if(!ANALYZE_ENDPOINT){$("an").textContent="Analysis backend not configured.";return}
-$("an").textContent="Analyzing...";const r=await fetch(ANALYZE_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:d})});
-const j=await r.json();$("an").textContent=j.text||JSON.stringify(j)}catch(e){err(e.name+": "+e.message)}};
+$("an").textContent="Grok is looking...";$("an").textContent=await api("/analyze",{image:d})}catch(e){err(e.name+": "+e.message)}};
 if(!navigator.mediaDevices)err("mediaDevices unavailable (needs https and a supporting browser)");
 </script></body></html>
