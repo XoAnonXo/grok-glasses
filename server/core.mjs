@@ -1,18 +1,42 @@
 export const VISION_MODEL="grok-4.20-0309-non-reasoning", CHAT_MODEL="grok-4.20-0309-non-reasoning";
 const ORIGINS=["https://raw.githack.com","https://rawcdn.githack.com","https://xoanonxo.github.io"];
-const SYS="You are Grok on tiny smart-glasses display. Reply in at most 2 short sentences, plain text, no markdown.";
-function cors(o){return{"Access-Control-Allow-Origin":ORIGINS.includes(o)||!o||o==="null"?(o||"*"):ORIGINS[0],"Access-Control-Allow-Methods":"POST,OPTIONS","Access-Control-Allow-Headers":"Content-Type,X-Glasses-Token","Vary":"Origin"}}
+const SYS="You are Grok on a tiny smart-glasses display. Reply in at most 2 short sentences, plain text, no markdown.";
+const VSYS="You are Grok, seeing through the user's smart glasses (frame from a video call). Describe the scene in 1-2 short sentences, plain text, focusing on what matters: people, objects, text, screens.";
+const MIN_FRAME_MS=1800, KEEP=100;
+function cors(o){return{"Access-Control-Allow-Origin":ORIGINS.includes(o)||!o||o==="null"?(o||"*"):ORIGINS[0],"Access-Control-Allow-Methods":"GET,POST,OPTIONS","Access-Control-Allow-Headers":"Content-Type,X-Glasses-Token","Vary":"Origin"}}
 async function xai(env,model,messages){const r=await fetch("https://api.x.ai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+env.XAI_API_KEY},body:JSON.stringify({model,messages,max_tokens:150})});
  const j=await r.json();if(!r.ok)throw new Error("xai "+r.status+": "+(j.error?.message||j.error||JSON.stringify(j)).toString().slice(0,200));return j.choices[0].message.content.trim()}
-export async function handle(req,env){const o=req.headers.get("Origin")||"",h={...cors(o),"Content-Type":"application/json"};
+const ham=(a,b)=>{try{let x=BigInt("0x"+a)^BigInt("0x"+b),n=0;while(x){n+=Number(x&1n);x>>=1n}return n}catch{return 99}};
+async function sha(s){const d=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return [...new Uint8Array(d)].slice(0,8).map(b=>b.toString(16).padStart(2,"0")).join("")}
+const blank=()=>({scene:"",sceneAt:0,lastReply:"",history:[],lastFrameAt:0,lastHash:"",lastSha:""});
+// store: {get():Promise<state|null>, put(state):Promise}
+export async function handle(req,env,store){const o=req.headers.get("Origin")||"",h={...cors(o),"Content-Type":"application/json"};
+ const J=(b,s=200)=>new Response(JSON.stringify(b),{status:s,headers:h});
  if(req.method==="OPTIONS")return new Response(null,{status:204,headers:h});
- const p=new URL(req.url).pathname;if(p==="/"||p==="/health")return new Response(JSON.stringify({ok:true}),{headers:h});
- if(req.method!=="POST")return new Response('{"error":"method"}',{status:405,headers:h});
- if(env.GLASSES_TOKEN&&req.headers.get("X-Glasses-Token")!==env.GLASSES_TOKEN)return new Response('{"error":"unauthorized"}',{status:401,headers:h});
- try{const b=await req.json();let text;
+ const p=new URL(req.url).pathname;if(p==="/"||p==="/health")return J({ok:true});
+ const st=Object.assign(blank(),(await store.get())||{});
+ if(p==="/state"&&req.method==="GET")return J({scene:st.scene,sceneAt:st.sceneAt,lastReply:st.lastReply,history:st.history.slice(-20)});
+ if(req.method!=="POST")return J({error:"method"},405);
+ try{const b=await req.json();const now=Date.now();
+  if(p==="/frame"){
+   if(!env.GLASSES_TOKEN)return J({error:"GLASSES_TOKEN not configured"},503);
+   if(req.headers.get("X-Glasses-Token")!==env.GLASSES_TOKEN)return J({error:"unauthorized"},401);
+   if(!/^data:image\//.test(b.image||""))throw new Error("image dataURL required");
+   if(now-st.lastFrameAt<MIN_FRAME_MS)return J({skipped:"rate",retryMs:MIN_FRAME_MS-(now-st.lastFrameAt)},429);
+   const s=await sha(b.image),fresh=now-st.sceneAt>30000;
+   if(!fresh&&(s===st.lastSha||(b.hash&&st.lastHash&&ham(b.hash,st.lastHash)<=4))){st.lastFrameAt=now;await store.put(st);return J({skipped:"duplicate",scene:st.scene})}
+   st.lastFrameAt=now;await store.put(st);
+   const text=await xai(env,VISION_MODEL,[{role:"system",content:VSYS},{role:"user",content:[{type:"image_url",image_url:{url:b.image,detail:"low"}},{type:"text",text:"What do I see right now?"}]}]);
+   Object.assign(st,{scene:text,sceneAt:now,lastSha:s,lastHash:b.hash||""});
+   const last=st.history[st.history.length-1];if(!(last&&last.role==="scene"&&last.text===text))st.history.push({role:"scene",text,at:now});
+   st.history=st.history.slice(-KEEP);await store.put(st);return J({text,sceneAt:now})}
+  if(p==="/chat"){if(!b.text)throw new Error("text required");const t=String(b.text).slice(0,4000);
+   const turns=st.history.filter(m=>m.role!=="scene").slice(-10).map(m=>({role:m.role,content:m.text.slice(0,2000)}));
+   const ctx=st.scene?[{role:"system",content:`Latest view from the user's glasses (${Math.round((now-st.sceneAt)/1000)}s ago): ${st.scene}`}]:[];
+   const text=await xai(env,CHAT_MODEL,[{role:"system",content:SYS},...ctx,...turns,{role:"user",content:t}]);
+   const fresh=Object.assign(blank(),(await store.get())||{});// re-read: frames may have landed meanwhile
+   fresh.history.push({role:"user",text:t,at:now},{role:"assistant",text,at:Date.now()});fresh.history=fresh.history.slice(-KEEP);fresh.lastReply=text;await store.put(fresh);
+   return J({text})}
   if(p==="/analyze"){if(!/^data:image\//.test(b.image||""))throw new Error("image dataURL required");
-   text=await xai(env,VISION_MODEL,[{role:"system",content:SYS},{role:"user",content:[{type:"image_url",image_url:{url:b.image,detail:"low"}},{type:"text",text:"Describe what is in this photo for a small display."}]}])}
-  else if(p==="/chat"){if(!b.text)throw new Error("text required");const hist=(Array.isArray(b.history)?b.history:[]).slice(-10).filter(m=>["user","assistant"].includes(m.role)).map(m=>({role:m.role,content:String(m.content).slice(0,2000)}));
-   text=await xai(env,CHAT_MODEL,[{role:"system",content:SYS},...hist,{role:"user",content:String(b.text).slice(0,4000)}])}
-  else return new Response('{"error":"not found"}',{status:404,headers:h});
-  return new Response(JSON.stringify({text}),{headers:h})}catch(e){return new Response(JSON.stringify({error:e.message}),{status:500,headers:h})}}
+   return J({text:await xai(env,VISION_MODEL,[{role:"system",content:SYS},{role:"user",content:[{type:"image_url",image_url:{url:b.image,detail:"low"}},{type:"text",text:"Describe what is in this photo for a small display."}]}])})}
+  return J({error:"not found"},404)}catch(e){return J({error:e.message},500)}}

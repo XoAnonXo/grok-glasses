@@ -1,3 +1,11 @@
 name = "grok-glasses-server"
 main = "worker.mjs"
 compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "STATE"
+class_name = "GlassesState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GlassesState"]
