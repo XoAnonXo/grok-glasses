@@ -49,11 +49,50 @@ def post(path, body, token=True):
 def get_state():
     with urllib.request.urlopen(SERVER + "/state", timeout=10) as r: return json.loads(r.read())
 
+HUD = {"scene": "", "reply": ""}
+
+def _font(sz):
+    from PIL import ImageFont
+    for f in ("/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/System/Library/Fonts/Helvetica.ttc", "/Library/Fonts/Arial.ttf"):
+        try: return ImageFont.truetype(f, sz)
+        except Exception: pass
+    return ImageFont.load_default()
+
+def _wrap(d, text, font, width):
+    lines, cur = [], ""
+    for w in (text or "").split():
+        t = (cur + " " + w).strip()
+        if d.textlength(t, font=font) <= width: cur = t
+        else: lines.append(cur); cur = w
+    if cur: lines.append(cur)
+    return lines
+
+def render_hud(W=1280, H=720):
+    from PIL import ImageDraw
+    img = Image.new("RGB", (W, H), "black"); d = ImageDraw.Draw(img)
+    lab, big = _font(34), _font(54); y = 30
+    for title, text, col in (("GROK SEES", HUD["scene"] or "waiting...", (140, 200, 255)), ("GROK SAYS", HUD["reply"] or "-", (255, 255, 255))):
+        d.text((40, y), title, font=lab, fill=col); y += 46
+        for ln in _wrap(d, text, big, W - 80)[:4]:
+            d.text((40, y), ln, font=big, fill="white"); y += 64
+        y += 30
+    return img
+
+def hud_loop():
+    import numpy as np, pyvirtualcam, threading
+    def run():
+        with pyvirtualcam.Camera(width=1280, height=720, fps=10) as cam:
+            print("HUD virtual camera:", cam.device, "- pick 'OBS Virtual Camera' as WhatsApp's camera")
+            while True:
+                cam.send(np.asarray(render_hud())); cam.sleep_until_next_frame()
+    threading.Thread(target=run, daemon=True).start()
+
 def main():
     a = argparse.ArgumentParser()
     a.add_argument("--list", action="store_true"); a.add_argument("--window", type=int)
     a.add_argument("--region", help="x,y,w,h in screen points (fallback)"); a.add_argument("--interval", type=float, default=2.0)
     a.add_argument("--size", type=int, default=768); a.add_argument("--say", action="store_true", help="speak new Grok replies with macOS say")
+    a.add_argument("--hud", action="store_true", help="render Grok's scene+reply to OBS Virtual Camera (pick it as WhatsApp camera)")
     o = a.parse_args()
     if o.list:
         for w in windows():
@@ -70,6 +109,7 @@ def main():
             region = input("Enter region x,y,w,h: ").strip()
     print("Capturing", f"window {win}" if win else f"region {region}", "->", SERVER)
     path = os.path.join(tempfile.gettempdir(), "grok_frame.jpg"); last_reply = None
+    if o.hud: hud_loop()
     if o.say:
         try: last_reply = get_state().get("lastReply")
         except Exception: pass
@@ -82,9 +122,10 @@ def main():
             data = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
             code, j = post("/frame", {"image": data, "hash": dhash(img)})
             print(time.strftime("%H:%M:%S"), code, j.get("text") or j.get("skipped") or j.get("error"))
-            if o.say:
-                r = get_state().get("lastReply")
-                if r and r != last_reply: last_reply = r; subprocess.Popen(["say", r])
+            if o.say or o.hud:
+                st = get_state(); r = st.get("lastReply")
+                HUD["scene"], HUD["reply"] = st.get("scene") or "", r or ""
+                if o.say and r and r != last_reply: last_reply = r; subprocess.Popen(["say", r])
         except subprocess.CalledProcessError:
             print("screencapture failed: grant Screen Recording permission to your Terminal, or the window closed.")
         except Exception as e:

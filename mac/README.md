@@ -16,3 +16,11 @@ python3 grok_frames.py --region 100,100,800,600   # fallback: screen region
 python3 grok_frames.py --say       # also speak Grok's replies (Mac audio goes into the call)
 ```
 Keep the call window visible-sized (it can be behind other windows with --window). The glasses page shows "Grok sees", "Grok says" and history.
+
+## Optional: HUD on the glasses Display (--hud)
+On a WhatsApp video call the glasses Display shows the Mac's outgoing video. `--hud` renders a black frame with big white text (Grok sees / Grok says) into a virtual camera.
+1. Install OBS Studio (obsproject.com), open it once, click **Start Virtual Camera**, then **Stop** and quit OBS (this installs the camera extension; approve it in System Settings → General → Login Items & Extensions → Camera Extensions if asked).
+2. `python3 -m pip install pyvirtualcam numpy`
+3. `python3 grok_frames.py --hud --say`
+4. In WhatsApp for Mac (during the call or in Settings → Video) choose **OBS Virtual Camera** as the camera.
+`--say` speaks each new Grok reply with macOS `say`; WhatsApp sends Mac audio to the glasses' speakers if the Mac mic picks it up (use speakers, not headphones).
