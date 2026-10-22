@@ -4,6 +4,8 @@ struct ContentView: View {
   @ObservedObject var model: AppModel
   @ObservedObject var controller: GlassesController
   @State private var question = ""
+  @State private var selectedBot = ServerClient.bots.first!
+  @State private var askBots = false
 
   init(model: AppModel) {
     self.model = model
@@ -35,12 +37,20 @@ struct ContentView: View {
 
         Section("Grok sees") { Text(controller.sceneText.isEmpty ? "—" : controller.sceneText) }
         Section("Grok says") { Text(controller.replyText.isEmpty ? "—" : controller.replyText) }
+        Section("Bot says") { Text(controller.botReplyText.isEmpty ? "—" : controller.botReplyText) }
 
-        Section("Ask Grok") {
+        Section("Ask") {
+          Toggle("Ask bots (otherwise Grok vision chat)", isOn: $askBots)
+          if askBots {
+            Picker("Bot", selection: $selectedBot) {
+              ForEach(ServerClient.bots, id: \.self) { Text($0) }
+            }
+          }
           TextField("Type a question", text: $question)
           Button("Send") {
             let q = question; question = ""
-            Task { await controller.ask(q) }
+            if askBots { Task { await controller.askBots(q, bot: selectedBot) } }
+            else { Task { await controller.ask(q) } }
           }
         }
       }
