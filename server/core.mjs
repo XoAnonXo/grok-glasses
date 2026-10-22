@@ -13,7 +13,7 @@ const blank=()=>({control:{enabled:true,cmd:"",cmdAt:0,by:""},bridge:{},pendingA
 export async function handle(req,env,store){const o=req.headers.get("Origin")||"",h={...cors(o),"Content-Type":"application/json"};
  const J=(b,s=200)=>new Response(JSON.stringify(b),{status:s,headers:h});
  if(req.method==="OPTIONS")return new Response(null,{status:204,headers:h});
- const p=new URL(req.url).pathname;if(p==="/"||p==="/health")return J({ok:true,v:5});
+ const p=new URL(req.url).pathname;if(p==="/"||p==="/health")return J({ok:true,v:8,hasXai:!!env.XAI_API_KEY,hasToken:!!env.GLASSES_TOKEN,hasRelay:!!(env.RELAY_URL&&env.RELAY_AUTH)});
  const st=Object.assign(blank(),(await store.get())||{});
  if(p==="/control"){
   if(!env.GLASSES_TOKEN)return J({error:"GLASSES_TOKEN not configured"},503);
@@ -34,11 +34,11 @@ export async function handle(req,env,store){const o=req.headers.get("Origin")||"
    const bot=String(b.bot||"Grok Bot").slice(0,60);const id=crypto.randomUUID();
    const ask={id,text:text.slice(0,4000),bot,at:now,status:"pending"};
    st.pendingAsk=ask;st.history.push({role:"ask",text:ask.text,bot,at:now});st.history=st.history.slice(-KEEP);
-   if(!env.RELAY_URL||!env.RELAY_AUTH){st.pendingAsk.status="relay_not_configured";await store.put(st);
+   const RURL=(env.RELAY_URL||"").trim(),RAUTH=(env.RELAY_AUTH||"").trim();
+   if(!RURL||!RAUTH){st.pendingAsk.status="relay_not_configured";await store.put(st);
     return J({id,status:"relay_not_configured",error:"relay not configured"},200)}
    await store.put(st);
-   try{const auth=/^\s*(Bearer|Basic|Token)\s/i.test(env.RELAY_AUTH)?env.RELAY_AUTH:env.RELAY_AUTH;
-    const r=await fetch(env.RELAY_URL,{method:"POST",headers:{Authorization:auth,"Content-Type":"application/json"},
+   try{const r=await fetch(RURL,{method:"POST",headers:{Authorization:RAUTH,"Content-Type":"application/json"},
      body:JSON.stringify({id,text:ask.text,bot,scene:st.scene})});
     const ok=r.ok;const body=await r.text().catch(()=>"");
     const fresh=Object.assign(blank(),(await store.get())||{});
@@ -47,7 +47,9 @@ export async function handle(req,env,store){const o=req.headers.get("Origin")||"
     return J({id,status:ok?"sent":"relay_error",relayStatus:r.status,relayBody:body.slice(0,200)},ok?200:502)}
    catch(e){const fresh=Object.assign(blank(),(await store.get())||{});
     if(fresh.pendingAsk&&fresh.pendingAsk.id===id)fresh.pendingAsk.status="relay_error";await store.put(fresh);
-    return J({id,status:"relay_error",error:e.message},502)}}
+    const detail=String(e.message||e).split(RURL).join("<relay_url>");
+    const diag={absoluteHttps:/^https:\/\//i.test(RURL),urlLen:RURL.length,authLen:RAUTH.length,host:(()=>{try{return new URL(RURL).host}catch{return "INVALID_URL"}})()};
+    return J({id,status:"relay_error",error:detail,diag},502)}}
   // /reply
   const text=String(b.text||"").trim();if(!text)return J({error:"text required"},400);
   const bot=String(b.bot||(st.pendingAsk&&st.pendingAsk.bot)||"Grok Bot").slice(0,60);
