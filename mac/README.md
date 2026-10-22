@@ -24,3 +24,10 @@ On a WhatsApp video call the glasses Display shows the Mac's outgoing video. `--
 3. `python3 grok_frames.py --hud --say`
 4. In WhatsApp for Mac (during the call or in Settings → Video) choose **OBS Virtual Camera** as the camera.
 `--say` speaks each new Grok reply with macOS `say`; WhatsApp sends Mac audio to the glasses' speakers if the Mac mic picks it up (use speakers, not headphones).
+
+## Voice into the call via BlackHole (--say --say-device)
+1. `brew install blackhole-2ch` (or download from existential.audio/blackhole), then reboot or restart Core Audio.
+2. Audio MIDI Setup → "+" → Create Multi-Output Device with your speakers + BlackHole 2ch (so you hear it too), optional.
+3. In WhatsApp for Mac → Settings → Calls / Video & Audio → Microphone: **BlackHole 2ch**.
+4. `python3 grok_frames.py --hud --say --say-device "BlackHole 2ch"` — each new Grok reply is spoken straight into the call and heard in the glasses speakers. (`say -a ?` lists device names.)
+Without BlackHole, plain `--say` plays on Mac speakers and the Mac mic picks it up.

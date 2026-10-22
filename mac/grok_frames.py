@@ -92,6 +92,7 @@ def main():
     a.add_argument("--list", action="store_true"); a.add_argument("--window", type=int)
     a.add_argument("--region", help="x,y,w,h in screen points (fallback)"); a.add_argument("--interval", type=float, default=2.0)
     a.add_argument("--size", type=int, default=768); a.add_argument("--say", action="store_true", help="speak new Grok replies with macOS say")
+    a.add_argument("--say-device", default=os.environ.get("SAY_DEVICE", ""), help='audio device for say, e.g. "BlackHole 2ch"')
     a.add_argument("--hud", action="store_true", help="render Grok's scene+reply to OBS Virtual Camera (pick it as WhatsApp camera)")
     o = a.parse_args()
     if o.list:
@@ -125,7 +126,7 @@ def main():
             if o.say or o.hud:
                 st = get_state(); r = st.get("lastReply")
                 HUD["scene"], HUD["reply"] = st.get("scene") or "", r or ""
-                if o.say and r and r != last_reply: last_reply = r; subprocess.Popen(["say", r])
+                if o.say and r and r != last_reply: last_reply = r; subprocess.Popen(["say"] + (["-a", o.say_device] if o.say_device else []) + [r])
         except subprocess.CalledProcessError:
             print("screencapture failed: grant Screen Recording permission to your Terminal, or the window closed.")
         except Exception as e:
