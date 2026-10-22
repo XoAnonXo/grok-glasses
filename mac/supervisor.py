@@ -7,6 +7,16 @@ import json, os, signal, subprocess, sys, time, urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 PY = sys.executable
 SERVER = os.environ.get("GROK_SERVER", "https://grok-glasses-server.conscious-carnation.workers.dev").rstrip("/")
+def _load_env():
+    f = os.path.join(HERE, ".env")
+    if os.path.exists(f):
+        for line in open(f):
+            line = line.strip()
+            if line.startswith("export "): line = line[7:]
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                os.environ[k.strip()] = v.strip().strip(chr(34)).strip(chr(39))
+_load_env()
 TOKEN = os.environ.get("GLASSES_TOKEN", "")
 UA = "Mozilla/5.0 GrokGlasses/1.0"
 
