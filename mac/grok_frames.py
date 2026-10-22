@@ -38,6 +38,8 @@ def dhash(img):
             bits = (bits << 1) | (p[r * 9 + c] > p[r * 9 + c + 1])
     return f"{bits:016x}"
 
+_op = urllib.request.build_opener(); _op.addheaders = [("User-Agent", "Mozilla/5.0 GrokGlasses/1.0")]; urllib.request.install_opener(_op)  # Cloudflare 1010 blocks default Python-urllib UA
+
 def post(path, body, token=True):
     h = {"Content-Type": "application/json"}
     if token: h["X-Glasses-Token"] = TOKEN

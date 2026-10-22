@@ -8,13 +8,23 @@ async function xai(env,model,messages){const r=await fetch("https://api.x.ai/v1/
  const j=await r.json();if(!r.ok)throw new Error("xai "+r.status+": "+(j.error?.message||j.error||JSON.stringify(j)).toString().slice(0,200));return j.choices[0].message.content.trim()}
 const ham=(a,b)=>{try{let x=BigInt("0x"+a)^BigInt("0x"+b),n=0;while(x){n+=Number(x&1n);x>>=1n}return n}catch{return 99}};
 async function sha(s){const d=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return [...new Uint8Array(d)].slice(0,8).map(b=>b.toString(16).padStart(2,"0")).join("")}
-const blank=()=>({scene:"",sceneAt:0,lastReply:"",history:[],lastFrameAt:0,lastHash:"",lastSha:""});
+const blank=()=>({control:{enabled:true,cmd:"",cmdAt:0,by:""},bridge:{},scene:"",sceneAt:0,lastReply:"",history:[],lastFrameAt:0,lastHash:"",lastSha:""});
 // store: {get():Promise<state|null>, put(state):Promise}
 export async function handle(req,env,store){const o=req.headers.get("Origin")||"",h={...cors(o),"Content-Type":"application/json"};
  const J=(b,s=200)=>new Response(JSON.stringify(b),{status:s,headers:h});
  if(req.method==="OPTIONS")return new Response(null,{status:204,headers:h});
- const p=new URL(req.url).pathname;if(p==="/"||p==="/health")return J({ok:true});
+ const p=new URL(req.url).pathname;if(p==="/"||p==="/health")return J({ok:true,v:3});
  const st=Object.assign(blank(),(await store.get())||{});
+ if(p==="/control"){
+  if(!env.GLASSES_TOKEN)return J({error:"GLASSES_TOKEN not configured"},503);
+  if(req.headers.get("X-Glasses-Token")!==env.GLASSES_TOKEN)return J({error:"unauthorized"},401);
+  if(req.method==="GET")return J({...st.control,bridge:st.bridge,now:Date.now()});
+  if(req.method!=="POST")return J({error:"method"},405);
+  const b=await req.json().catch(()=>({}));
+  if(typeof b.enabled==="boolean")st.control.enabled=b.enabled;
+  if(typeof b.cmd==="string"){st.control.cmd=b.cmd.slice(0,40);st.control.cmdAt=Date.now()}
+  if(b.bridge&&typeof b.bridge==="object")st.bridge={...b.bridge,at:Date.now()};
+  await store.put(st);return J({...st.control,bridge:st.bridge})}
  if(p==="/state"&&req.method==="GET")return J({scene:st.scene,sceneAt:st.sceneAt,lastReply:st.lastReply,history:st.history.slice(-20)});
  if(req.method!=="POST")return J({error:"method"},405);
  try{const b=await req.json();const now=Date.now();

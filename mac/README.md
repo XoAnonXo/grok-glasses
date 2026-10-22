@@ -31,3 +31,19 @@ On a WhatsApp video call the glasses Display shows the Mac's outgoing video. `--
 3. In WhatsApp for Mac → Settings → Calls / Video & Audio → Microphone: **BlackHole 2ch**.
 4. `python3 grok_frames.py --hud --say --say-device "BlackHole 2ch"` — each new Grok reply is spoken straight into the call and heard in the glasses speakers. (`say -a ?` lists device names.)
 Without BlackHole, plain `--say` plays on Mac speakers and the Mac mic picks it up.
+
+## Auto-answer + always-on bridge (LaunchAgent)
+`autoanswer.py` uses the Accessibility API to find WhatsApp's incoming-call Accept button and press it. `supervisor.py` loops: auto-answer, run `grok_frames.py --hud` while a call is active, stop it when it ends, and obey the server `/control` flag. Install:
+1. `~/grok-glasses/.venv/bin/pip install pyobjc-framework-ApplicationServices pyobjc-framework-Cocoa`
+2. Grant permissions ONCE to the real Python binary
+   `/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14`
+   (and `/usr/bin/osascript`) in System Settings → Privacy & Security:
+   - **Accessibility** (to click Accept)
+   - **Screen & System Audio Recording** (grok_frames.py capture)
+   Easiest: run `~/grok-glasses/.venv/bin/python autoanswer.py --dump` once; macOS prompts for Accessibility — approve it, then drag the binary into the Screen Recording list too.
+3. Load the agent: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.grokglasses.bridge.plist`
+   Reload after edits: `launchctl bootout gui/$(id -u)/com.grokglasses.bridge; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.grokglasses.bridge.plist`
+4. Logs: `tail -f ~/grok-glasses/bridge.log`
+
+### Remote control (no SSH)
+`POST /control` with header `X-Glasses-Token` (body `{"cmd":"start"|"stop"|"answer"}` or `{"enabled":false}`) tells the running supervisor to force capture on/off. `GET /control` shows the latest `bridge` status it reported.
