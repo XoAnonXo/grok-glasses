@@ -8,12 +8,12 @@ async function xai(env,model,messages){const r=await fetch("https://api.x.ai/v1/
  const j=await r.json();if(!r.ok)throw new Error("xai "+r.status+": "+(j.error?.message||j.error||JSON.stringify(j)).toString().slice(0,200));return j.choices[0].message.content.trim()}
 const ham=(a,b)=>{try{let x=BigInt("0x"+a)^BigInt("0x"+b),n=0;while(x){n+=Number(x&1n);x>>=1n}return n}catch{return 99}};
 async function sha(s){const d=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return [...new Uint8Array(d)].slice(0,8).map(b=>b.toString(16).padStart(2,"0")).join("")}
-const blank=()=>({control:{enabled:true,cmd:"",cmdAt:0,by:""},bridge:{},scene:"",sceneAt:0,lastReply:"",history:[],lastFrameAt:0,lastHash:"",lastSha:""});
+const blank=()=>({control:{enabled:true,cmd:"",cmdAt:0,by:""},bridge:{},pendingAsk:null,botReply:null,scene:"",sceneAt:0,lastReply:"",history:[],lastFrameAt:0,lastHash:"",lastSha:""});
 // store: {get():Promise<state|null>, put(state):Promise}
 export async function handle(req,env,store){const o=req.headers.get("Origin")||"",h={...cors(o),"Content-Type":"application/json"};
  const J=(b,s=200)=>new Response(JSON.stringify(b),{status:s,headers:h});
  if(req.method==="OPTIONS")return new Response(null,{status:204,headers:h});
- const p=new URL(req.url).pathname;if(p==="/"||p==="/health")return J({ok:true,v:3});
+ const p=new URL(req.url).pathname;if(p==="/"||p==="/health")return J({ok:true,v:5});
  const st=Object.assign(blank(),(await store.get())||{});
  if(p==="/control"){
   if(!env.GLASSES_TOKEN)return J({error:"GLASSES_TOKEN not configured"},503);
@@ -25,7 +25,37 @@ export async function handle(req,env,store){const o=req.headers.get("Origin")||"
   if(typeof b.cmd==="string"){st.control.cmd=b.cmd.slice(0,40);st.control.cmdAt=Date.now()}
   if(b.bridge&&typeof b.bridge==="object")st.bridge={...b.bridge,at:Date.now()};
   await store.put(st);return J({...st.control,bridge:st.bridge})}
- if(p==="/state"&&req.method==="GET")return J({scene:st.scene,sceneAt:st.sceneAt,lastReply:st.lastReply,history:st.history.slice(-20)});
+ if(p==="/ask"||p==="/reply"){
+  if(!env.GLASSES_TOKEN)return J({error:"GLASSES_TOKEN not configured"},503);
+  if(req.headers.get("X-Glasses-Token")!==env.GLASSES_TOKEN)return J({error:"unauthorized"},401);
+  if(req.method!=="POST")return J({error:"method"},405);
+  const b=await req.json().catch(()=>({}));const now=Date.now();
+  if(p==="/ask"){const text=String(b.text||"").trim();if(!text)return J({error:"text required"},400);
+   const bot=String(b.bot||"Grok Bot").slice(0,60);const id=crypto.randomUUID();
+   const ask={id,text:text.slice(0,4000),bot,at:now,status:"pending"};
+   st.pendingAsk=ask;st.history.push({role:"ask",text:ask.text,bot,at:now});st.history=st.history.slice(-KEEP);
+   if(!env.RELAY_URL||!env.RELAY_AUTH){st.pendingAsk.status="relay_not_configured";await store.put(st);
+    return J({id,status:"relay_not_configured",error:"relay not configured"},200)}
+   await store.put(st);
+   try{const auth=/^\s*(Bearer|Basic|Token)\s/i.test(env.RELAY_AUTH)?env.RELAY_AUTH:env.RELAY_AUTH;
+    const r=await fetch(env.RELAY_URL,{method:"POST",headers:{Authorization:auth,"Content-Type":"application/json"},
+     body:JSON.stringify({id,text:ask.text,bot,scene:st.scene})});
+    const ok=r.ok;const body=await r.text().catch(()=>"");
+    const fresh=Object.assign(blank(),(await store.get())||{});
+    if(fresh.pendingAsk&&fresh.pendingAsk.id===id)fresh.pendingAsk.status=ok?"sent":"relay_error";
+    await store.put(fresh);
+    return J({id,status:ok?"sent":"relay_error",relayStatus:r.status,relayBody:body.slice(0,200)},ok?200:502)}
+   catch(e){const fresh=Object.assign(blank(),(await store.get())||{});
+    if(fresh.pendingAsk&&fresh.pendingAsk.id===id)fresh.pendingAsk.status="relay_error";await store.put(fresh);
+    return J({id,status:"relay_error",error:e.message},502)}}
+  // /reply
+  const text=String(b.text||"").trim();if(!text)return J({error:"text required"},400);
+  const bot=String(b.bot||(st.pendingAsk&&st.pendingAsk.bot)||"Grok Bot").slice(0,60);
+  st.botReply={id:b.id||null,bot,text:text.slice(0,4000),at:now};
+  if(st.pendingAsk&&(!b.id||st.pendingAsk.id===b.id))st.pendingAsk.status="answered";
+  st.history.push({role:"bot",text:st.botReply.text,bot,at:now});st.history=st.history.slice(-KEEP);
+  await store.put(st);return J({ok:true,botReply:st.botReply})}
+ if(p==="/state"&&req.method==="GET")return J({scene:st.scene,sceneAt:st.sceneAt,lastReply:st.lastReply,pendingAsk:st.pendingAsk,botReply:st.botReply,history:st.history.slice(-20)});
  if(req.method!=="POST")return J({error:"method"},405);
  try{const b=await req.json();const now=Date.now();
   if(p==="/frame"){

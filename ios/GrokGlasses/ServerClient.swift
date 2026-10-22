@@ -14,9 +14,16 @@ struct ServerClient {
     let scene: String
     let sceneAt: Double
     let lastReply: String
-    struct Turn: Decodable { let role: String; let text: String; let at: Double }
+    struct Turn: Decodable { let role: String; let text: String; let at: Double; let bot: String? }
     let history: [Turn]
+    struct BotReply: Decodable { let id: String?; let bot: String; let text: String; let at: Double }
+    struct PendingAsk: Decodable { let id: String; let text: String; let bot: String; let at: Double; let status: String }
+    let botReply: BotReply?
+    let pendingAsk: PendingAsk?
   }
+
+  static let bots = ["Grok Bot", "Gmail bot", "Helpoooor", "GelatoBot",
+                     "Dubizzle Bot", "Rightsverse Growth", "Research bot Aeralyte", "Corporate Aeralyte"]
 
   private func request(_ path: String, method: String, json: [String: Any]?, withToken: Bool) throws -> URLRequest {
     guard let url = URL(string: base + path) else { throw URLError(.badURL) }
@@ -51,7 +58,16 @@ struct ServerClient {
     return text(from: data)
   }
 
-  /// GET /state -> {scene, sceneAt, lastReply, history}
+  /// POST /ask {text, bot} -> {id, status}. Token-gated. Routes to the user's Grok Bot bots.
+  struct AskResult { let id: String?; let status: String }
+  func ask(_ message: String, bot: String) async throws -> AskResult {
+    let req = try request("/ask", method: "POST", json: ["text": message, "bot": bot], withToken: true)
+    let (data, _) = try await URLSession.shared.data(for: req)
+    let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    return AskResult(id: obj["id"] as? String, status: (obj["status"] as? String) ?? "error")
+  }
+
+  /// GET /state -> {scene, sceneAt, lastReply, botReply, pendingAsk, history}
   func state() async throws -> StateResp {
     let req = try request("/state", method: "GET", json: nil, withToken: false)
     let (data, _) = try await URLSession.shared.data(for: req)

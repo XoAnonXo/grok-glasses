@@ -1,26 +1,47 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Grok Glasses</title>
 <style>body{background:#000;color:#fff;font-family:sans-serif;margin:0;padding:10px;font-size:20px}h1{margin:0;font-size:24px}h2{margin:10px 0 2px;font-size:18px;color:#8cf;text-transform:uppercase}
 .big{font-size:26px;font-weight:bold;line-height:1.25}#st{color:#aaa;font-size:16px}#err{color:#f66;font-size:18px}
-input{width:100%;box-sizing:border-box;font-size:24px;padding:12px;background:#000;color:#fff;border:3px solid #fff;border-radius:14px}
+input,select{width:100%;box-sizing:border-box;font-size:24px;padding:12px;background:#000;color:#fff;border:3px solid #fff;border-radius:14px}
 button{width:100%;font-size:24px;padding:12px;margin:6px 0;background:#000;color:#fff;border:3px solid #fff;border-radius:14px}button:focus{background:#fff;color:#000}
-#hist{max-height:260px;overflow-y:auto;border-top:2px solid #444;font-size:19px}#hist div{padding:4px 0;border-bottom:1px solid #222}.u{color:#ff8}.a{color:#fff}.s{color:#8cf}</style></head><body>
+#tokrow{display:flex;gap:6px}#tok{flex:1}#savetok{width:auto;white-space:nowrap}
+#hist{max-height:240px;overflow-y:auto;border-top:2px solid #444;font-size:19px}#hist div{padding:4px 0;border-bottom:1px solid #222}.u{color:#ff8}.a{color:#fff}.s{color:#8cf}.ask{color:#fc8}.bot{color:#9f9}</style></head><body>
 <h1>Grok Glasses</h1><div id="st">Connected. Ready.</div><div id="err"></div>
 <h2>Grok sees</h2><div id="scene" class="big">Waiting for camera…</div>
 <h2>Grok says</h2><div id="reply" class="big">—</div>
-<form id="f"><input id="q" type="text" placeholder="Ask Grok (dictate or type)" enterkeyhint="send"><button type="submit">Send</button></form>
+<h2>Bot says</h2><div id="botreply" class="big">—</div>
+<div id="tokrow"><input id="tok" type="password" placeholder="glasses token (for Ask bots)"><button id="savetok">Save</button></div>
+<select id="bot">
+<option>Grok Bot</option><option>Gmail bot</option><option>Helpoooor</option><option>GelatoBot</option>
+<option>Dubizzle Bot</option><option>Rightsverse Growth</option><option>Research bot Aeralyte</option><option>Corporate Aeralyte</option>
+</select>
+<select id="mode"><option value="vision">Grok vision chat</option><option value="bots">Ask bots</option></select>
+<form id="f"><input id="q" type="text" placeholder="Type a question" enterkeyhint="send"><button type="submit">Send</button></form>
 <h2>History</h2><div id="hist" tabindex="0"></div>
 <script>
 const API_BASE="https://grok-glasses-server.conscious-carnation.workers.dev";
 const $=id=>document.getElementById(id),err=m=>{$("err").textContent=m?"Error: "+m:""};
 const ago=t=>{const s=Math.round((Date.now()-t)/1000);return s<60?s+"s ago":Math.round(s/60)+"m ago"};
-let lastKey="";
+let lastKey="",token=localStorage.getItem("glassesToken")||"";
+$("tok").value=token;$("savetok").onclick=()=>{token=$("tok").value.trim();localStorage.setItem("glassesToken",token);err("")};
 async function poll(){try{const r=await fetch(API_BASE+"/state",{cache:"no-store"});const j=await r.json();err("");
  $("scene").textContent=j.scene||"Waiting for camera…";$("st").textContent=j.sceneAt?"View updated "+ago(j.sceneAt):"No camera frames yet";
  if(j.lastReply)$("reply").textContent=j.lastReply;
+ if(j.botReply)$("botreply").textContent=(j.botReply.bot?j.botReply.bot+": ":"")+j.botReply.text;
+ else if(j.pendingAsk&&j.pendingAsk.status==="sent")$("botreply").textContent="("+j.pendingAsk.bot+" is thinking…)";
  const key=JSON.stringify(j.history.map(m=>m.at));if(key!==lastKey){lastKey=key;const H=$("hist");H.innerHTML="";
-  j.history.slice().reverse().forEach(m=>{const d=document.createElement("div");d.className=m.role==="user"?"u":m.role==="scene"?"s":"a";
-   d.textContent=(m.role==="user"?"You: ":m.role==="scene"?"Saw: ":"Grok: ")+m.text;H.appendChild(d)})}}catch(e){err("server unreachable")}}
-$("f").onsubmit=async e=>{e.preventDefault();const t=$("q").value.trim();$("q").value="";if(!t)return;$("reply").textContent="Grok is thinking…";
- try{const r=await fetch(API_BASE+"/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:t})});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);$("reply").textContent=j.text;poll()}catch(e){err(e.message)}};
+  j.history.slice().reverse().forEach(m=>{const d=document.createElement("div");
+   d.className=m.role==="user"?"u":m.role==="scene"?"s":m.role==="ask"?"ask":m.role==="bot"?"bot":"a";
+   const pfx=m.role==="user"?"You: ":m.role==="scene"?"Saw: ":m.role==="ask"?("Ask "+(m.bot||"")+": "):m.role==="bot"?((m.bot||"Bot")+": "):"Grok: ";
+   d.textContent=pfx+m.text;H.appendChild(d)})}}catch(e){err("server unreachable")}}
+$("f").onsubmit=async e=>{e.preventDefault();const t=$("q").value.trim();$("q").value="";if(!t)return;
+ if($("mode").value==="bots"){
+  if(!token)return err("enter the glasses token and tap Save first");
+  const bot=$("bot").value;$("botreply").textContent="("+bot+" is thinking…)";
+  try{const r=await fetch(API_BASE+"/ask",{method:"POST",headers:{"Content-Type":"application/json","X-Glasses-Token":token},body:JSON.stringify({text:t,bot})});
+   const j=await r.json();if(!r.ok&&j.status!=="relay_not_configured")throw new Error(j.error||r.status);
+   if(j.status==="relay_not_configured")$("botreply").textContent="(relay not configured on the server yet)";poll()}catch(e){err(e.message)}
+ }else{$("reply").textContent="Grok is thinking…";
+  try{const r=await fetch(API_BASE+"/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:t})});
+   const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);$("reply").textContent=j.text;poll()}catch(e){err(e.message)}}};
 poll();setInterval(poll,2000);
 </script></body></html>

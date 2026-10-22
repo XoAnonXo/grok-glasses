@@ -13,6 +13,7 @@ import MWDATSpeech
 final class GlassesController: ObservableObject {
   @Published var sceneText = ""
   @Published var replyText = ""
+  @Published var botReplyText = ""
   @Published var status = "Idle"
   @Published var streaming = false
 
@@ -180,6 +181,22 @@ final class GlassesController: ObservableObject {
     }
   }
 
+  // MARK: - Ask bots
+
+  func askBots(_ text: String, bot: String) async {
+    let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !q.isEmpty else { return }
+    botReplyText = "(\(bot) is thinking…)"
+    do {
+      let res = try await client.ask(q, bot: bot)
+      if res.status == "relay_not_configured" {
+        botReplyText = "(relay not configured on the server yet)"
+      }
+    } catch {
+      status = "Ask error: \(error.localizedDescription)"
+    }
+  }
+
   // MARK: - Chat
 
   func ask(_ text: String) async {
@@ -210,6 +227,7 @@ final class GlassesController: ObservableObject {
           await MainActor.run {
             if !st.scene.isEmpty { self.sceneText = st.scene }
             if !st.lastReply.isEmpty { self.replyText = st.lastReply }
+            if let br = st.botReply { self.botReplyText = "\(br.bot): \(br.text)" }
           }
           await self.renderCards()
         }
